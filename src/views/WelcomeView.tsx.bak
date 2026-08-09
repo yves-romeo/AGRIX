@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
-  Menu, X, ArrowRight,
-  Microscope, RadioTower, Globe2,
+  Menu, X, ArrowRight, ScanLine, Satellite, Cpu,
+  ShoppingBag, ChevronRight, Microscope, RadioTower, Globe2,
 } from 'lucide-react';
 import { useLang } from '../lib/i18n';
 import type { ViewId } from '../lib/nav';
@@ -69,6 +69,13 @@ const FEATURES = [
   },
 ];
 
+const MODULES = [
+  { icon: ScanLine,    label: 'AI Center', id: 'aicenter'   as ViewId },
+  { icon: Satellite,   label: 'Satellite', id: 'satellite'  as ViewId },
+  { icon: Cpu,         label: 'Telemetry', id: 'telemetry'  as ViewId },
+  { icon: ShoppingBag, label: 'Market',    id: 'agrimarket' as ViewId },
+];
+
 function useScanY() {
   const [pct, setPct] = useState(0);
   const raf = useRef(0);
@@ -89,50 +96,8 @@ function useScanY() {
 export function WelcomeView({ onEnter }: { onEnter: (v: ViewId) => void }) {
   const { lang, toggle } = useLang();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [selectedSection, setSelectedSection] = useState<'Solutions' | 'About Us' | 'Contact'>('Solutions');
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
   const [hoveredCard, setHoveredCard] = useState<number | null>(null);
   const scanY = useScanY();
-
-  const SECTION_CONTENT: Record<'Solutions' | 'About Us' | 'Contact', { title: string; body: string; details?: string[] }> = {
-    Solutions: {
-      title: 'How AgriX solves Rwanda’s agricultural challenges',
-      body: 'AgriX delivers real-time MINAGRI market transparency, instant AI leaf disease scanning, satellite field boundary health scoring, and connected IoT telemetry for smarter smallholder decisions.',
-      details: [
-        'Instant local pricing visibility from Rwandan markets and verified buyer matches.',
-        'AI-powered crop disease diagnosis from leaf images with verified agronomy guidance.',
-        'Satellite boundary analytics that detect cultivated cropland health vs non-agricultural areas.',
-        'Live IoT sensor telemetry for soil moisture, temperature, and field condition alerts.',
-      ],
-    },
-    'About Us': {
-      title: 'Empowering Rwanda’s farmers and agritech ecosystem',
-      body: 'Our mission is to equip Rwandan smallholder farmers, youth entrepreneurs, and local agri-cooperatives with accessible AI and precision agri-tech tools that boost productivity, transparency, and income.',
-    },
-    Contact: {
-      title: 'Reach AgriX support in Kigali',
-      body: 'Contact our team for marketplace access, telemetry setup, and crop health support.',
-      details: [
-        'Email: support@agrix.rw',
-        'WhatsApp / Phone: +250 788 123 456',
-        'Kigali HQ: KG 7 Ave, Kigali, Rwanda',
-      ],
-    },
-  };
-
-  const handleLoginSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) {
-      setLoginError('Enter both email and password to continue.');
-      return;
-    }
-    setLoginError('');
-    setLoginOpen(false);
-    onEnter('aicenter');
-  };
 
   return (
     <>
@@ -161,15 +126,9 @@ export function WelcomeView({ onEnter }: { onEnter: (v: ViewId) => void }) {
             </div>
 
             {/* Centre links */}
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-8">
               {['Solutions', 'About Us', 'Contact'].map((l) => (
-                <button
-                  key={l}
-                  onClick={() => setSelectedSection(l as 'Solutions' | 'About Us' | 'Contact')}
-                  className={`rounded-full border px-4 py-2 text-[13px] font-medium transition ${
-                    selectedSection === l ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700' : 'border-emerald-100 bg-white text-slate-700 hover:bg-emerald-50'
-                  }`}
-                >
+                <button key={l} className="text-[13px] font-medium text-gray-600 tracking-wide transition-colors hover:text-gray-900">
                   {l}
                 </button>
               ))}
@@ -198,13 +157,7 @@ export function WelcomeView({ onEnter }: { onEnter: (v: ViewId) => void }) {
           {menuOpen && (
             <div className="absolute top-16 right-7 z-40 rounded-2xl border border-black/10 bg-white/90 backdrop-blur-xl px-6 py-5 flex flex-col gap-3 shadow-xl">
               {['Solutions', 'About Us', 'Contact'].map((l) => (
-                <button
-                  key={l}
-                  onClick={() => { setSelectedSection(l as 'Solutions' | 'About Us' | 'Contact'); setMenuOpen(false); }}
-                  className={`w-full text-left text-sm font-medium transition ${selectedSection === l ? 'text-emerald-700' : 'text-gray-700 hover:text-black'}`}
-                >
-                  {l}
-                </button>
+                <button key={l} className="text-sm font-medium text-gray-700 hover:text-black text-left transition-colors">{l}</button>
               ))}
             </div>
           )}
@@ -238,7 +191,7 @@ export function WelcomeView({ onEnter }: { onEnter: (v: ViewId) => void }) {
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <button
-                  onClick={() => setLoginOpen(true)}
+                  onClick={() => onEnter('aicenter')}
                   className="group flex items-center gap-2 rounded-full px-6 py-3 text-sm font-bold text-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
                   style={{ background: '#0a1a0e', letterSpacing: '0.02em' }}
                 >
@@ -254,19 +207,13 @@ export function WelcomeView({ onEnter }: { onEnter: (v: ViewId) => void }) {
               </div>
 
               {/* Inline mini stats */}
-              <div className="mt-10 rounded-3xl border border-emerald-100 bg-white/90 p-6 shadow-sm">
-                <h3 className="text-sm font-semibold text-emerald-700">{SECTION_CONTENT[selectedSection].title}</h3>
-                <p className="mt-3 text-sm leading-7 text-gray-600">{SECTION_CONTENT[selectedSection].body}</p>
-                {SECTION_CONTENT[selectedSection].details && (
-                  <ul className="mt-4 space-y-2 text-sm text-slate-600">
-                    {SECTION_CONTENT[selectedSection].details.map((detail) => (
-                      <li key={detail} className="flex items-start gap-2">
-                        <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                        <span>{detail}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+              <div className="mt-10 flex gap-6">
+                {[['38+','diseases'], ['4','modules'], ['24/7','uptime']].map(([v, l]) => (
+                  <div key={l}>
+                    <p className="text-xl font-black text-gray-900">{v}</p>
+                    <p className="text-[11px] text-gray-400 uppercase tracking-widest">{l}</p>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -342,18 +289,18 @@ export function WelcomeView({ onEnter }: { onEnter: (v: ViewId) => void }) {
                 <circle cx="210" cy="270" r="3.5" fill="rgba(5,150,105,0.6)" />
               </svg>
 
-              {/* Dashed orbit ring (hidden per request) */}
+              {/* Dashed orbit ring */}
               <div aria-hidden style={{
                 position: 'absolute', top: '50%', left: '50%',
-                width: '120%', paddingBottom: '120%', borderRadius: '50%',
-                border: 'none',
-                boxShadow: 'none',
-                animation: 'none',
+                width: '115%', paddingBottom: '115%', borderRadius: '50%',
+                border: '1px dashed rgba(5,150,105,0.28)',
+                animation: 'ringRotate 18s linear infinite',
                 zIndex: 24, pointerEvents: 'none',
               }} />
 
               {/* HUD badges */}
               <HudBadge top="2%"  right="-42%" label="TELEMETRY"   value="ACTIVE"       pulse="hudPulse 2.4s ease-in-out infinite" />
+              <HudBadge bottom="6%" left="-46%" label="SCANNING"   value="98.4% HEALTHY" pulse="blink 2.8s ease-in-out infinite" />
               <HudBadge top="20%" left="-44%" label="CHLOROPHYLL"  value="42.7 SPAD"    pulse="hudPulse 3.5s ease-in-out infinite" />
               <HudBadge bottom="22%" right="-40%" label="CONFIDENCE" value="99.1%"      pulse="hudPulse 2s ease-in-out infinite" />
             </div>
@@ -417,101 +364,26 @@ export function WelcomeView({ onEnter }: { onEnter: (v: ViewId) => void }) {
           </div>
         </div>
 
-        {loginOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-emerald-600">Email login</p>
-                  <h3 className="mt-2 text-2xl font-bold text-slate-900">Sign in to AgriX</h3>
-                </div>
+        {/* ═══════════════ MODULE GRID ═══════════════ */}
+        <div className="bg-white py-14 px-5 sm:px-8 lg:px-14 border-t border-gray-100">
+          <div className="mx-auto max-w-6xl">
+            <p className="mb-5 text-[10px] font-bold uppercase tracking-[0.35em] text-gray-400">All Modules</p>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {MODULES.map((m) => (
                 <button
-                  type="button"
-                  onClick={() => setLoginOpen(false)}
-                  className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-100"
+                  key={m.id}
+                  onClick={() => onEnter(m.id)}
+                  className="group flex items-center justify-between rounded-2xl border border-gray-200 bg-gray-50 p-4 text-left transition-all duration-300 hover:border-emerald-300 hover:bg-emerald-50 hover:-translate-y-0.5"
                 >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <form onSubmit={handleLoginSubmit} className="mt-6 space-y-4">
-                <label className="block text-sm font-semibold text-slate-700">Email address</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                  required
-                />
-                <label className="block text-sm font-semibold text-slate-700">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                  required
-                />
-                {loginError && <p className="text-sm text-rose-600">{loginError}</p>}
-                <button
-                  type="submit"
-                  className="w-full rounded-full bg-emerald-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800"
-                >
-                  Continue
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLoginOpen(false)}
-                  className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-                >
-                  Cancel
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-        <div className="w-full bg-gray-50 py-12">
-          <div className="mx-auto max-w-6xl px-5">
-            <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
-              {(['Solutions', 'About Us', 'Contact'] as const).map((key) => {
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setSelectedSection(key)}
-                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${selectedSection === key ? 'bg-emerald-600 text-white shadow-soft' : 'bg-white text-slate2-700 border border-slate2-200 hover:bg-slate2-50'}`}
-                  >
-                    {key}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              {(['Solutions', 'About Us', 'Contact'] as const).map((key) => {
-                const item = SECTION_CONTENT[key];
-                const active = selectedSection === key;
-                return (
-                  <div
-                    key={key}
-                    onClick={() => setSelectedSection(key)}
-                    className={`rounded-3xl border p-7 cursor-pointer transition ${active ? 'border-emerald-200 bg-emerald-50 shadow-soft' : 'border-slate2-100 bg-white hover:border-emerald-100 hover:bg-slate2-50'}`}
-                  >
-                    <h4 className="text-sm font-semibold uppercase tracking-[0.35em] text-emerald-600">{key}</h4>
-                    <p className="mt-3 text-base font-semibold text-slate-900">{item.title}</p>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">{item.body}</p>
-                    {item.details && (
-                      <ul className="mt-4 space-y-2 text-sm text-slate-600">
-                        {item.details.map((detail) => (
-                          <li key={detail} className="flex items-start gap-2">
-                            <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                            <span>{detail}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white">
+                      <m.icon className="h-4 w-4 text-emerald-600" />
+                    </div>
+                    <span className="text-sm font-semibold text-gray-700 group-hover:text-gray-900">{m.label}</span>
                   </div>
-                );
-              })}
+                  <ChevronRight className="h-4 w-4 text-gray-300 transition-all duration-300 group-hover:translate-x-0.5 group-hover:text-emerald-500" />
+                </button>
+              ))}
             </div>
           </div>
         </div>

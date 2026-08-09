@@ -4,7 +4,6 @@ import {
   ChevronDown,
   Compass,
   HeartPulse,
-  Loader2,
   Locate,
   MapPin,
   Minus,
@@ -12,12 +11,9 @@ import {
   Plus,
   Ruler,
   Target,
-  Wifi,
-  WifiOff,
   X,
 } from 'lucide-react';
 import { useLang } from '../lib/i18n';
-import { useHardwareConnection } from '../lib/hardware';
 
 /* ─────────────────────────────────────────────
    Global Leaflet type shim
@@ -30,7 +26,7 @@ declare global {
 
 type LatLngTuple = [number, number];
 type ViewMode = 'landing' | 'map';
-type CropKey = 'maize' | 'potatoes' | 'beans' | 'cassava' | 'coffee' | 'tea';
+type CropKey = 'maize' | 'potatoes' | 'beans';
 
 /* ─────────────────────────────────────────────
    Crop configuration table
@@ -41,9 +37,6 @@ interface CropConfig {
   seedRate: number;
   npkRate: number;
   ureaRate: number;
-  targetNdvi: [number, number];
-  moistureRange: [number, number];
-  harvestWindow: string;
 }
 
 const CROPS: Record<CropKey, CropConfig> = {
@@ -53,59 +46,20 @@ const CROPS: Record<CropKey, CropConfig> = {
     seedRate: 25,
     npkRate: 100,
     ureaRate: 50,
-    targetNdvi: [0.72, 0.86],
-    moistureRange: [28, 35],
-    harvestWindow: '90–110 days',
   },
   potatoes: {
-    labelEn: 'Irish Potatoes (Ibirayi)',
-    labelRw: 'Ibirayi (Irish Potatoes)',
+    labelEn: 'Potatoes (Ibirayi)',
+    labelRw: 'Ibirayi (Potatoes)',
     seedRate: 2000,
     npkRate: 150,
     ureaRate: 0,
-    targetNdvi: [0.68, 0.84],
-    moistureRange: [30, 38],
-    harvestWindow: '100–130 days',
   },
   beans: {
-    labelEn: 'Beans (Ibibanyi)',
-    labelRw: 'Ibibanyi (Beans)',
+    labelEn: 'Beans (Ubushyimbo)',
+    labelRw: 'Ubushyimbo (Beans)',
     seedRate: 60,
     npkRate: 80,
     ureaRate: 0,
-    targetNdvi: [0.65, 0.82],
-    moistureRange: [22, 30],
-    harvestWindow: '70–90 days',
-  },
-  cassava: {
-    labelEn: 'Cassava (Imyumbati)',
-    labelRw: 'Imyumbati (Cassava)',
-    seedRate: 1000,
-    npkRate: 120,
-    ureaRate: 0,
-    targetNdvi: [0.55, 0.75],
-    moistureRange: [24, 32],
-    harvestWindow: '220–300 days',
-  },
-  coffee: {
-    labelEn: 'Coffee',
-    labelRw: 'Ikawa (Coffee)',
-    seedRate: 3000,
-    npkRate: 120,
-    ureaRate: 0,
-    targetNdvi: [0.60, 0.78],
-    moistureRange: [30, 40],
-    harvestWindow: '6–8 months',
-  },
-  tea: {
-    labelEn: 'Tea',
-    labelRw: 'Icayi (Tea)',
-    seedRate: 2500,
-    npkRate: 100,
-    ureaRate: 0,
-    targetNdvi: [0.58, 0.76],
-    moistureRange: [32, 42],
-    harvestWindow: '3–5 years',
   },
 };
 
@@ -157,24 +111,6 @@ function pickLabel(address: Record<string, string> | undefined, fallback: string
   );
 }
 
-function deriveCropInsights(crop: CropConfig, ndvi: number, moisture: number, healthyPercent: number, dryPercent: number) {
-  const [targetMin, targetMax] = crop.targetNdvi;
-  const [moistMin, moistMax] = crop.moistureRange;
-  const ndviStatus = ndvi >= targetMin ? 'Healthy canopy' : ndvi >= targetMin - 0.1 ? 'Moderate crop vigor' : 'Crop vigor needs attention';
-  const moistureStatus = moisture >= moistMin && moisture <= moistMax ? 'Soil moisture is within the target range' : moisture < moistMin ? 'Soil moisture is below the crop target' : 'Soil moisture is above the crop target';
-
-  return {
-    title: `${crop.labelEn} field insights`,
-    bullets: [
-      `${ndviStatus}. Target NDVI for ${crop.labelEn} is ${targetMin.toFixed(2)}–${targetMax.toFixed(2)}.`,
-      `${moistureStatus}. Ideal moisture for this crop is ${moistMin}%–${moistMax}%.`,
-      `Apply ${crop.npkRate} kg/Ha of balanced NPK${crop.ureaRate > 0 ? ` and ${crop.ureaRate} kg/Ha of urea` : ''} to support canopy development.`,
-      `Keep ${healthyPercent}% of the canopy healthy and minimize the ${dryPercent}% stressed area with focused irrigation or soil nutrition.`,
-      `Plan harvest around ${crop.harvestWindow} after planting, adjusting for local conditions and crop growth stage.`,
-    ],
-  };
-}
-
 const BOUNDARY_STORAGE_KEY = 'agriX_saved_field_boundary';
 
 function loadSavedBoundary() {
@@ -197,7 +133,6 @@ function loadSavedBoundary() {
 ══════════════════════════════════════════════════════════ */
 export function SatelliteView() {
   const { t, lang } = useLang();
-  const { isConnected: isDeviceConnected, isConnecting, connect, disconnect } = useHardwareConnection();
 
   /* refs */
   const mapRef          = useRef<HTMLDivElement | null>(null);
@@ -207,7 +142,6 @@ export function SatelliteView() {
   const toolActiveRef   = useRef(false);
   /** Set to false on unmount — prevents async state updates on dead components */
   const isMountedRef    = useRef(true);
-  const analysisTimerRef = useRef<number | null>(null);
 
   /* load saved boundary state across tab switches */
   const savedBoundary = useMemo(() => loadSavedBoundary(), []);
@@ -230,56 +164,41 @@ export function SatelliteView() {
   /* analytics drawer */
   const [drawerOpen, setDrawerOpen]                   = useState(Boolean(savedBoundary?.boundaryClosed));
   const [healthOverlayEnabled, setHealthOverlayEnabled] = useState(false);
-  const [selectedCrop, setSelectedCrop]               = useState<CropKey | null>(null);
+  const [selectedCrop, setSelectedCrop]               = useState<CropKey>('maize');
   const [cropDropOpen, setCropDropOpen]               = useState(false);
 
   /* live sensor simulation */
   const [ndvi, setNdvi]         = useState(0.76);
   const [moisture, setMoisture] = useState(24);
 
-  const [analysisInProgress, setAnalysisInProgress] = useState(false);
-  const [reportReady, setReportReady]               = useState(false);
-
-  useEffect(() => {
-    return () => {
-      if (analysisTimerRef.current) {
-        window.clearTimeout(analysisTimerRef.current);
-      }
-    };
-  }, []);
-
   /* ── derived values ── */
   const areaHa = useMemo(() => calculateAreaHa(vertices), [vertices]);
   const areaAc = areaHa * 2.471;
-  const areaSqM = Math.round(areaHa * 10_000);
 
-  const nonAgricultural = boundaryClosed && ndvi < 0.33 && moisture < 26;
-  const healthLabel = nonAgricultural
-    ? t.satNonAgricultural
-    : ndvi >= 0.7
-      ? t.satHighChloro
-      : ndvi >= 0.5
-        ? t.satModerate
-        : t.satDeficiency;
-  const moistureLabel = moisture >= 35 ? t.satOptimal : moisture >= 20 ? t.satModerate : t.satDeficiency;
+  const healthLabel   = ndvi >= 0.7 ? t.satHighChloro   : ndvi >= 0.5 ? t.satModerate : t.satDeficiency;
+  const moistureLabel = moisture >= 35 ? t.satOptimal    : moisture >= 20 ? t.satModerate : t.satDeficiency;
 
   const healthyPercent = useMemo(
-    () => (nonAgricultural ? 0 : Math.max(55, Math.round(Math.min(92, ndvi * 100 + (moisture > 28 ? 6 : 2))))),
-    [ndvi, moisture, nonAgricultural],
+    () => Math.max(55, Math.round(Math.min(92, ndvi * 100 + (moisture > 28 ? 6 : 2)))),
+    [ndvi, moisture],
   );
   const dryPercent = 100 - healthyPercent;
 
-  const crop = selectedCrop ? CROPS[selectedCrop] : null;
-  const seedKg = crop ? Number((areaHa * crop.seedRate).toFixed(1)) : 0;
-  const npkKg = crop ? Number((areaHa * crop.npkRate).toFixed(1)) : 0;
-  const ureaKg = crop ? Number((areaHa * crop.ureaRate).toFixed(1)) : 0;
-  const cropInsights = crop ? deriveCropInsights(crop, ndvi, moisture, healthyPercent, dryPercent) : null;
+  const crop   = CROPS[selectedCrop];
+  const seedKg = Number((areaHa * crop.seedRate).toFixed(1));
+  const npkKg  = Number((areaHa * crop.npkRate).toFixed(1));
+  const ureaKg = Number((areaHa * crop.ureaRate).toFixed(1));
 
-  useEffect(() => {
-    if (selectedCrop) {
-      setReportReady(true);
-    }
-  }, [selectedCrop]);
+  const diagnosticEn = useMemo(
+    () =>
+      `Your land is mostly healthy, but the ${dryPercent}% yellow area shows moisture deficiency. Consider targeted irrigation on the eastern edge.`,
+    [dryPercent],
+  );
+  const diagnosticRw = useMemo(
+    () =>
+      `Umurima wawe urafite ubuzima bwiza ku kigero cya ${healthyPercent}%, ariko igice cya ${dryPercent}% cyagagaje icyuho cy'amazi. Gerageza kuvomerera igice cy'iburasirazuba.`,
+    [dryPercent, healthyPercent],
+  );
 
   /* ── body scroll lock ── */
   const lockBodyScroll = useCallback((locked: boolean) => {
@@ -351,18 +270,11 @@ export function SatelliteView() {
       map.on('movestart zoomstart', () => lockBodyScroll(true));
       map.on('moveend zoomend',     () => lockBodyScroll(false));
 
-      // Double-requestAnimationFrame: waits for browser to finish layout pass
-      // before measuring container dimensions, preventing the black tile bug.
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          map.invalidateSize({ animate: false });
-          if (center && zoom !== null) map.setView(center, zoom, { animate: false });
-        });
+        map.invalidateSize();
+        if (center && zoom !== null) map.setView(center, zoom, { animate: false });
       });
-      // Belt-and-suspenders: also invalidate after a short delay for slow mounts
-      window.setTimeout(() => {
-        if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize({ animate: false });
-      }, 350);
+      window.setTimeout(() => map.invalidateSize(), 220);
 
       return () => {
         map.off('click', onMapClick);
@@ -534,15 +446,15 @@ export function SatelliteView() {
     }
   }, [boundaryClosed, vertices, locationLabel, center, zoom]);
 
-  /* ── live sensor simulation (only when hardware is connected) ── */
+  /* ── live sensor simulation ── */
   useEffect(() => {
-    if (!boundaryClosed || !isDeviceConnected) return;
+    if (!boundaryClosed) return;
     const id = window.setInterval(() => {
       setNdvi(v     => Math.max(0.55, Math.min(0.92, v + (Math.random() - 0.5) * 0.028)));
       setMoisture(v => Math.max(16,   Math.min(42,   v + (Math.random() - 0.5) * 1.4)));
     }, 2800);
     return () => window.clearInterval(id);
-  }, [boundaryClosed, isDeviceConnected]);
+  }, [boundaryClosed]);
 
   /* ── cleanup: scroll lock + mount flag ── */
   useEffect(() => {
@@ -762,22 +674,10 @@ export function SatelliteView() {
   /* ── boundary controls ── */
   const finishBoundary = () => {
     if (vertices.length < 3) return;
-    if (analysisTimerRef.current) {
-      window.clearTimeout(analysisTimerRef.current);
-    }
     setBoundaryClosed(true);
     setInteractionLocked(true);
     setToolActive(false);
     setDrawerOpen(true);
-    setAnalysisInProgress(true);
-    setReportReady(false);
-    setSelectedCrop(null);
-
-    analysisTimerRef.current = window.setTimeout(() => {
-      if (!isMountedRef.current) return;
-      setAnalysisInProgress(false);
-      analysisTimerRef.current = null;
-    }, 1200);
   };
 
   const handleFocusPlot = useCallback(() => {
@@ -800,18 +700,11 @@ export function SatelliteView() {
   }, [vertices.length]);
 
   const editBoundary = () => {
-    if (analysisTimerRef.current) {
-      window.clearTimeout(analysisTimerRef.current);
-      analysisTimerRef.current = null;
-    }
     setBoundaryClosed(false);
     setInteractionLocked(false);
     setToolActive(true);
     setDrawerOpen(false);
     setHealthOverlayEnabled(false);
-    setAnalysisInProgress(false);
-    setReportReady(false);
-    setSelectedCrop(null);
   };
 
   const resetView = () => {
@@ -820,19 +713,12 @@ export function SatelliteView() {
     } catch {
       /* ignore */
     }
-    if (analysisTimerRef.current) {
-      window.clearTimeout(analysisTimerRef.current);
-      analysisTimerRef.current = null;
-    }
     setToolActive(false);
     setVertices([]);
     setBoundaryClosed(false);
     setInteractionLocked(false);
     setDrawerOpen(false);
     setHealthOverlayEnabled(false);
-    setAnalysisInProgress(false);
-    setReportReady(false);
-    setSelectedCrop(null);
     setError(null);
     setViewMode('landing');
     setCenter(null);
@@ -848,23 +734,17 @@ export function SatelliteView() {
     <div className="space-y-4">
 
       {/* ═══ MAP CARD ═══ */}
-      <div className="mx-auto flex w-full justify-center px-4 sm:px-6">
-        <div className="relative w-full max-w-[1000px] overflow-hidden rounded-[1.5rem] border border-stone-200/70 bg-stone-950 shadow-[0_24px_80px_rgba(0,0,0,0.16)]">
+      <div className="mx-auto flex w-full max-w-[1000px] justify-center">
+        <div className="relative w-full overflow-hidden rounded-[1.5rem] border border-stone-200/70 bg-stone-950 shadow-[0_24px_80px_rgba(0,0,0,0.16)]">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.14),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(52,211,153,0.24),_transparent_35%)]" />
 
-          <div className="relative min-h-[420px] w-full sm:min-h-[520px]">
+          <div className="relative h-[380px] w-full sm:h-[480px]">
 
-            {/* Leaflet canvas — fills the absolute wrapper above */}
+            {/* Leaflet canvas — touch-action: none stops page scroll during pinch */}
             <div
               ref={mapRef}
-              className="absolute inset-0 w-full h-full"
-              style={{
-                touchAction: 'none',
-                overflow: 'hidden',
-                position: 'absolute',
-                top: 0, left: 0, right: 0, bottom: 0,
-                zIndex: 1,
-              }}
+              className="h-full w-full"
+              style={{ touchAction: 'none', overflow: 'hidden', position: 'relative' }}
               onMouseEnter={() => lockBodyScroll(true)}
               onMouseLeave={() => lockBodyScroll(false)}
               onWheel={e => e.stopPropagation()}
@@ -876,8 +756,8 @@ export function SatelliteView() {
 
             {/* ── LANDING OVERLAY ── */}
             {viewMode === 'landing' && (
-              <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-[min(100vw-2rem,28rem)] rounded-[2rem] border border-white/15 bg-white/95 p-4 shadow-[0_30px_90px_rgba(0,0,0,0.2)] sm:p-6 max-h-[88vh] overflow-y-auto">
+              <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-stone-950/70 p-4 backdrop-blur-[2px]">
+                <div className="w-full max-w-xl rounded-[2rem] border border-white/15 bg-white/95 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.2)] sm:p-8">
                   <div className="flex items-center gap-3 text-emerald-700">
                     <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-50">
                       <MapPin className="h-5 w-5" />
@@ -897,7 +777,7 @@ export function SatelliteView() {
                       id="btn-use-gps"
                       onClick={handleGps}
                       disabled={searching}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 shadow-sm transition hover:bg-stone-50 disabled:opacity-60 sm:w-auto"
+                      className="inline-flex items-center justify-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 shadow-sm transition hover:bg-stone-50 disabled:opacity-60"
                     >
                       <Locate className="h-4 w-4" />
                       {searching
@@ -912,13 +792,13 @@ export function SatelliteView() {
                         onChange={e => setSearchInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleSearch()}
                         placeholder={t.satSearchPlaceholder}
-                        className="flex-1 min-w-0 rounded-full border border-stone-300 bg-white px-4 py-3 text-sm text-stone-800 shadow-sm outline-none ring-0 focus:border-emerald-400"
+                        className="flex-1 rounded-full border border-stone-300 bg-white px-4 py-3 text-sm text-stone-800 shadow-sm outline-none ring-0 focus:border-emerald-400"
                       />
                       <button
                         id="btn-search-plot"
                         onClick={handleSearch}
                         disabled={searching}
-                        className="w-full rounded-full bg-stone-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-700 disabled:opacity-60 sm:w-auto"
+                        className="rounded-full bg-stone-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-700 disabled:opacity-60"
                       >
                         {searching ? t.satSearching : t.satSearchPlot}
                       </button>
@@ -985,34 +865,6 @@ export function SatelliteView() {
               <Compass className="h-4 w-4 text-emerald-400" />
               <span className="max-w-[140px] truncate text-[13px]">{locationLabel}</span>
 
-              {/* Hardware connection toggle badge */}
-              {isDeviceConnected ? (
-                <button
-                  id="btn-toggle-hardware"
-                  onClick={disconnect}
-                  title="Disconnect hardware"
-                  className="flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/20 px-2.5 py-1 text-[11px] font-semibold text-cyan-300 transition hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/30"
-                >
-                  <Wifi className="h-3 w-3" />
-                  HW Connected
-                </button>
-              ) : isConnecting ? (
-                <span className="flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold text-amber-300">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Connecting…
-                </span>
-              ) : (
-                <button
-                  id="btn-toggle-hardware"
-                  onClick={connect}
-                  title="Connect hardware"
-                  className="flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/20 px-2.5 py-1 text-[11px] font-semibold text-rose-300 transition hover:bg-cyan-500/20 hover:text-cyan-300 hover:border-cyan-500/30"
-                >
-                  <WifiOff className="h-3 w-3" />
-                  HW Disconnected
-                </button>
-              )}
-
               {boundaryClosed && (
                 <button
                   id="btn-open-analytics"
@@ -1039,17 +891,17 @@ export function SatelliteView() {
             </div>
 
             {/* ── RIGHT TOOLBAR ── */}
-            <div className="absolute inset-x-3 bottom-4 z-[1000] flex flex-col items-stretch gap-2 sm:right-3 sm:bottom-auto sm:left-auto sm:items-end">
+            <div className="absolute right-3 top-16 z-[1000] flex flex-col gap-2">
               <button
                 id="btn-cut-boundary"
                 onClick={() => setToolActive(v => !v)}
-                className={`w-full max-w-[100%] sm:w-auto rounded-full border px-3.5 py-2.5 text-sm font-semibold shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition ${
+                className={`rounded-full border px-3.5 py-2.5 text-sm font-semibold shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition ${
                   toolActive
                     ? 'border-emerald-400 bg-emerald-600 text-white'
                     : 'border-white/20 bg-white/90 text-stone-800 hover:bg-white'
-                } lg:px-4 lg:py-3`}
+                }`}
               >
-                <span className="flex items-center justify-center gap-2">
+                <span className="flex items-center gap-2">
                   <PenTool className="h-4 w-4" />
                   {t.satCutBoundary}
                 </span>
@@ -1059,9 +911,9 @@ export function SatelliteView() {
                 <button
                   id="btn-finish-boundary"
                   onClick={finishBoundary}
-                  className="w-full sm:w-auto rounded-full border border-white/20 bg-stone-900/90 px-3.5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-stone-800"
+                  className="rounded-full border border-white/20 bg-stone-900/90 px-3.5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-stone-800"
                 >
-                  <span className="flex items-center justify-center gap-2">
+                  <span className="flex items-center gap-2">
                     <Check className="h-4 w-4" />
                     {t.satFinishBoundary}
                   </span>
@@ -1072,9 +924,9 @@ export function SatelliteView() {
                 <button
                   id="btn-focus-plot-right"
                   onClick={handleFocusPlot}
-                  className="w-full sm:w-auto rounded-full border border-white/20 bg-emerald-600/90 px-3.5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-emerald-500"
+                  className="rounded-full border border-white/20 bg-emerald-600/90 px-3.5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-emerald-500"
                 >
-                  <span className="flex items-center justify-center gap-2">
+                  <span className="flex items-center gap-2">
                     <Target className="h-4 w-4" />
                     {lang === 'en' ? 'Focus Plot' : 'Reba Umurima'}
                   </span>
@@ -1085,9 +937,9 @@ export function SatelliteView() {
                 <button
                   id="btn-edit-boundary"
                   onClick={editBoundary}
-                  className="w-full sm:w-auto rounded-full border border-white/20 bg-white/90 px-3.5 py-2.5 text-sm font-semibold text-stone-800 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-white"
+                  className="rounded-full border border-white/20 bg-white/90 px-3.5 py-2.5 text-sm font-semibold text-stone-800 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-white"
                 >
-                  <span className="flex items-center justify-center gap-2">
+                  <span className="flex items-center gap-2">
                     <PenTool className="h-4 w-4" />
                     {lang === 'en' ? 'Edit Boundary' : 'Hindura Umupaka'}
                   </span>
@@ -1097,9 +949,9 @@ export function SatelliteView() {
               <button
                 id="btn-reset-view"
                 onClick={resetView}
-                className="w-full sm:w-auto rounded-full border border-white/20 bg-white/90 px-3.5 py-2.5 text-sm font-semibold text-stone-800 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-white"
+                className="rounded-full border border-white/20 bg-white/90 px-3.5 py-2.5 text-sm font-semibold text-stone-800 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur transition hover:bg-white"
               >
-                <span className="flex items-center justify-center gap-2">
+                <span className="flex items-center gap-2">
                   <X className="h-4 w-4" />
                   {t.satResetView}
                 </span>
@@ -1146,242 +998,220 @@ export function SatelliteView() {
             </button>
           </div>
 
-          {/* ─ ANALYSIS OVERLAY / STEP 1 ─ */}
-          {analysisInProgress && (
-            <div className="rounded-[1.5rem] border border-emerald-200 bg-emerald-50/80 p-8 text-center shadow-sm">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/90 text-emerald-600 shadow-sm animate-pulse">
-                <span className="text-3xl">⏳</span>
-              </div>
-              <h3 className="text-lg font-semibold text-stone-900">AgriX AI is analyzing satellite imagery & soil metrics...</h3>
-              <p className="mt-2 max-w-xl mx-auto text-sm text-stone-600">Processing the drawn field boundary to generate a crop-aware precision farming report.</p>
-            </div>
-          )}
-
           {/* ─ CROP SELECTOR ─ */}
-          {!analysisInProgress && (
-            <div className="relative">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.25em] text-stone-500">
-                SELECT CROP
-              </p>
-              <button
-                id="btn-crop-selector"
-                onClick={() => setCropDropOpen(v => !v)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50 px-5 py-3.5 text-sm font-semibold text-stone-800 transition hover:border-emerald-300 hover:bg-emerald-50/40"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="text-lg">🌱</span>
-                  <span>{selectedCrop ? (lang === 'en' ? crop?.labelEn : crop?.labelRw) : (lang === 'en' ? 'Choose crop to begin' : 'Hitamo igihingwa') }</span>
-                </span>
-                <ChevronDown className={`h-4 w-4 text-stone-500 transition-transform ${cropDropOpen ? 'rotate-180' : ''}`} />
-              </button>
+          <div className="relative">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.25em] text-stone-500">
+              {lang === 'en' ? 'Select Crop' : 'Hitamo Igihingwa'}
+            </p>
+            <button
+              id="btn-crop-selector"
+              onClick={() => setCropDropOpen(v => !v)}
+              className="flex w-full items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50 px-5 py-3.5 text-sm font-semibold text-stone-800 transition hover:border-emerald-300 hover:bg-emerald-50/40"
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-lg">🌱</span>
+                {lang === 'en' ? crop.labelEn : crop.labelRw}
+              </span>
+              <ChevronDown className={`h-4 w-4 text-stone-500 transition-transform ${cropDropOpen ? 'rotate-180' : ''}`} />
+            </button>
 
-              {cropDropOpen && (
-                <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_16px_40px_rgba(0,0,0,0.12)]">
-                  {(Object.keys(CROPS) as CropKey[]).map(key => (
-                    <button
-                      key={key}
-                      id={`btn-crop-${key}`}
-                      onClick={() => {
-                        setSelectedCrop(key);
-                        setCropDropOpen(false);
-                      }}
-                      className={`flex w-full items-center gap-3 px-5 py-3.5 text-sm font-medium transition hover:bg-emerald-50 ${
-                        selectedCrop === key ? 'bg-emerald-50/70 font-semibold text-emerald-700' : 'text-stone-700'
-                      }`}
-                    >
-                      {selectedCrop === key ? <Check className="h-4 w-4 text-emerald-600" /> : <span className="w-4" />}
-                      {lang === 'en' ? CROPS[key].labelEn : CROPS[key].labelRw}
-                    </button>
-                  ))}
-                </div>
-              )}
+            {cropDropOpen && (
+              <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_16px_40px_rgba(0,0,0,0.12)]">
+                {(Object.keys(CROPS) as CropKey[]).map(key => (
+                  <button
+                    key={key}
+                    id={`btn-crop-${key}`}
+                    onClick={() => { setSelectedCrop(key); setCropDropOpen(false); }}
+                    className={`flex w-full items-center gap-3 px-5 py-3.5 text-sm font-medium transition hover:bg-emerald-50 ${
+                      selectedCrop === key ? 'bg-emerald-50/70 font-semibold text-emerald-700' : 'text-stone-700'
+                    }`}
+                  >
+                    {selectedCrop === key ? <Check className="h-4 w-4 text-emerald-600" /> : <span className="w-4" />}
+                    {lang === 'en' ? CROPS[key].labelEn : CROPS[key].labelRw}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ─ KEY METRICS ─ */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-[1rem] border border-stone-100 bg-gradient-to-br from-blue-50 to-blue-50/50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">{t.satTotalArea}</p>
+              <p className="mt-2 text-2xl font-bold text-stone-900">{areaHa.toFixed(3)}</p>
+              <p className="mt-1 text-xs text-stone-500">{t.satHectares} &middot; {areaAc.toFixed(2)} {t.satAcres}</p>
             </div>
-          )}
-
-          {!analysisInProgress && !selectedCrop && (
-            <div className="rounded-[1.5rem] border border-stone-200 bg-stone-50/60 p-6 text-center">
-              <p className="text-sm text-stone-700">Select the crop type to unlock your AgriX AI Field Report and tailored growing advice.</p>
+            <div className="rounded-[1rem] border border-stone-100 bg-gradient-to-br from-emerald-50 to-emerald-50/50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">{t.satCropHealth}</p>
+              <p className="mt-2 text-2xl font-bold text-stone-900">{ndvi.toFixed(2)}</p>
+              <p className="mt-1 text-xs text-stone-500">{healthLabel}</p>
             </div>
-          )}
+            <div className="rounded-[1rem] border border-stone-100 bg-gradient-to-br from-amber-50 to-amber-50/50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">{t.satSoilMoistureEst}</p>
+              <p className="mt-2 text-2xl font-bold text-stone-900">{moisture.toFixed(0)}%</p>
+              <p className="mt-1 text-xs text-stone-500">{moistureLabel}</p>
+            </div>
+          </div>
 
-          {selectedCrop && reportReady && (
-            <>
-              {/* ─ KEY METRICS ─ */}
-              {/* Hardware Disconnected banner */}
-              {!isDeviceConnected && (
-                <div className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
-                  <WifiOff className="h-4 w-4 shrink-0 text-rose-500" />
-                  <div>
-                    <p className="text-sm font-semibold text-rose-700">Hardware Disconnected</p>
-                    <p className="text-xs text-rose-500">Live NDVI, moisture, and canopy health values are unavailable. Connect your AgroQuantum field device to receive real sensor telemetry.</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-[1rem] border border-stone-100 bg-gradient-to-br from-slate-50 to-slate-50/90 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">Cut Plot Area</p>
-                  <p className="mt-2 text-2xl font-bold text-stone-900">{areaHa.toFixed(3)} Ha</p>
-                  <p className="mt-1 text-xs text-stone-500">{areaSqM.toLocaleString()} m² · {areaAc.toFixed(2)} Ac — from polygon boundary</p>
-                </div>
-                <div className="rounded-[1rem] border border-stone-100 bg-emerald-50/80 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">Crop Health Index (NDVI)</p>
-                  {isDeviceConnected ? (
-                    <>
-                      <p className="mt-2 text-2xl font-bold text-stone-900">{ndvi.toFixed(2)}</p>
-                      <p className="mt-1 text-xs text-stone-500">{healthLabel}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-2 text-2xl font-bold text-stone-400">--</p>
-                      <span className="mt-1 inline-flex items-center rounded-md bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-600">Hardware Disconnected</span>
-                    </>
-                  )}
-                </div>
-                <div className="rounded-[1rem] border border-stone-100 bg-amber-50/80 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">Soil Moisture Estimate</p>
-                  {isDeviceConnected ? (
-                    <>
-                      <p className="mt-2 text-2xl font-bold text-stone-900">{moisture.toFixed(0)}%</p>
-                      <p className="mt-1 text-xs text-stone-500">{moistureLabel}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-2 text-2xl font-bold text-stone-400">--</p>
-                      <span className="mt-1 inline-flex items-center rounded-md bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-600">Hardware Disconnected</span>
-                    </>
-                  )}
-                </div>
+          {/* ─ GREEN vs DRY ZONE BREAKDOWN ─ */}
+          <div className="rounded-[1.25rem] border border-stone-200 bg-stone-50/60 p-6">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100">
+                <HeartPulse className="h-5 w-5 text-emerald-600" />
               </div>
-
-              {/* ─ GREEN vs DRY ZONE BREAKDOWN ─ */}
-              <div className="rounded-[1.25rem] border border-stone-200 bg-stone-50/60 p-6">
-                <div className="mb-5 flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100">
-                    <HeartPulse className="h-5 w-5 text-emerald-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-stone-900">Crop Canopy Health</h3>
-                    <p className="text-xs text-stone-500">Vegetation density & moisture status</p>
-                  </div>
-                </div>
-
-                {isDeviceConnected ? (
-                  <div className="space-y-5">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-xs font-semibold text-stone-600">🌿 Healthy Crop Canopy</span>
-                        <span className="text-sm font-bold text-emerald-600">{healthyPercent}%</span>
-                      </div>
-                      <div className="h-3.5 overflow-hidden rounded-full bg-stone-200">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 shadow-[0_0_12px_rgba(52,211,153,0.3)] transition-all duration-700"
-                          style={{ width: `${healthyPercent}%` }}
-                        />
-                      </div>
-                      <p className="mt-1.5 text-xs text-stone-500">{healthyPercent}% Healthy Canopy</p>
-                    </div>
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-xs font-semibold text-stone-600">⚠️ Dry / Stressed Area</span>
-                        <span className="text-sm font-bold text-amber-600">{dryPercent}%</span>
-                      </div>
-                      <div className="h-3.5 overflow-hidden rounded-full bg-stone-200">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-500 shadow-[0_0_12px_rgba(251,146,60,0.3)] transition-all duration-700"
-                          style={{ width: `${dryPercent}%` }}
-                        />
-                      </div>
-                      <p className="mt-1.5 text-xs text-stone-500">{dryPercent}% Moisture Deficiency</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-xs font-semibold text-stone-600">🌿 Healthy Crop Canopy</span>
-                        <span className="text-sm font-bold text-stone-300">--</span>
-                      </div>
-                      <div className="h-3.5 overflow-hidden rounded-full bg-stone-200">
-                        <div className="h-full w-0 rounded-full bg-stone-300" />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-xs font-semibold text-stone-600">⚠️ Dry / Stressed Area</span>
-                        <span className="text-sm font-bold text-stone-300">--</span>
-                      </div>
-                      <div className="h-3.5 overflow-hidden rounded-full bg-stone-200">
-                        <div className="h-full w-0 rounded-full bg-stone-300" />
-                      </div>
-                    </div>
-                    <p className="text-xs text-rose-500">Connect hardware to receive live canopy health telemetry.</p>
-                  </div>
-                )}
-              </div>
-
-              {/* ─ KEY INSIGHT ─ */}
-              <div className="rounded-[1.25rem] border-2 border-emerald-200 bg-gradient-to-r from-emerald-50/80 to-emerald-50/40 p-5">
-                <div className="flex gap-3">
-                  <div className="mt-0.5 flex-shrink-0">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100">
-                      <Check className="h-4 w-4 text-emerald-600" />
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="mb-1 text-sm font-bold text-stone-900">Actionable Insights</h4>
-                    {cropInsights?.bullets.map((item, index) => (
-                      <p key={index} className="text-sm leading-relaxed text-stone-700">{item}</p>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* ─ INPUT REQUIREMENTS (crop-dynamic) ─ */}
-              <div className="rounded-[1.25rem] border border-stone-200 bg-stone-50/60 p-6">
-                <div className="mb-5 flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-100">
-                    <Ruler className="h-5 w-5 text-sky-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-stone-900">Input Recommendations</h3>
-                    <p className="text-xs text-stone-500">Based on {areaHa.toFixed(3)} Ha · {lang === 'en' ? crop?.labelEn : crop?.labelRw}</p>
-                  </div>
-                </div>
-
-                <div className={`grid gap-3 ${crop?.ureaRate ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                  <div className="rounded-[0.875rem] border border-stone-200 bg-white p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-stone-600">Seed</p>
-                    <p className="mt-2 text-xl font-bold text-stone-900">{seedKg} <span className="text-sm font-normal text-stone-400">kg</span></p>
-                    <p className="mt-1 text-xs text-stone-500">{crop?.seedRate} kg/Ha × {areaHa.toFixed(3)} Ha</p>
-                  </div>
-
-                  <div className="rounded-[0.875rem] border border-stone-200 bg-white p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-stone-600">NPK Fertilizer</p>
-                    <p className="mt-2 text-xl font-bold text-stone-900">{npkKg} <span className="text-sm font-normal text-stone-400">kg</span></p>
-                    <p className="mt-1 text-xs text-stone-500">{crop?.npkRate} kg/Ha × {areaHa.toFixed(3)} Ha</p>
-                  </div>
-
-                  {crop?.ureaRate ? (
-                    <div className="rounded-[0.875rem] border border-stone-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-stone-600">Urea</p>
-                      <p className="mt-2 text-xl font-bold text-stone-900">{ureaKg} <span className="text-sm font-normal text-stone-400">kg</span></p>
-                      <p className="mt-1 text-xs text-stone-500">{crop?.ureaRate} kg/Ha × {areaHa.toFixed(3)} Ha</p>
-                    </div>
-                  ) : null}
-                </div>
-
-                <p className="mt-4 text-xs text-stone-400">Formula: Area (Ha) × Rate (kg/Ha) — values calculated from exact polygon surface area.</p>
-              </div>
-
-              {/* ─ FOOTER ─ */}
-              <div className="rounded-[1rem] border border-stone-100 bg-stone-50/40 p-4 text-center">
+              <div>
+                <h3 className="text-sm font-bold text-stone-900">
+                  {lang === 'en' ? 'Crop Canopy Health' : "Ubwiza bw'Ibimera"}
+                </h3>
                 <p className="text-xs text-stone-500">
-                  Cut Plot Area: <strong>{areaHa.toFixed(3)} Ha</strong> · {areaSqM.toLocaleString()} m² · {areaAc.toFixed(2)} Ac — Edit the boundary to recalculate live.
+                  {lang === 'en'
+                    ? 'Vegetation density & moisture status'
+                    : "Ubusizi bw'ibimera & icyuho cy'amazi"}
                 </p>
               </div>
-            </>
-          )}
+            </div>
+
+            <div className="space-y-5">
+              {/* Healthy bar */}
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-stone-600">
+                    {lang === 'en' ? '\uD83D\uDFE9 Healthy Crop Canopy (Green)' : '\uD83D\uDFE9 Igihingwa Gikura Neza (Icyatsi)'}
+                  </span>
+                  <span className="text-sm font-bold text-emerald-600">{healthyPercent}%</span>
+                </div>
+                <div className="h-3.5 overflow-hidden rounded-full bg-stone-200">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 shadow-[0_0_12px_rgba(52,211,153,0.3)] transition-all duration-700"
+                    style={{ width: `${healthyPercent}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-stone-500">
+                  {lang === 'en'
+                    ? `${healthyPercent}% Healthy Canopy`
+                    : `${healthyPercent}% Igihingwa Gikora Neza`}
+                </p>
+              </div>
+
+              {/* Dry bar */}
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-stone-600">
+                    {lang === 'en' ? '\uD83D\uDFE8 Dry / Stressed Area (Yellow)' : '\uD83D\uDFE8 Igice Cyumye / Gihangayika (Umuhondo)'}
+                  </span>
+                  <span className="text-sm font-bold text-amber-600">{dryPercent}%</span>
+                </div>
+                <div className="h-3.5 overflow-hidden rounded-full bg-stone-200">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-500 shadow-[0_0_12px_rgba(251,146,60,0.3)] transition-all duration-700"
+                    style={{ width: `${dryPercent}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-stone-500">
+                  {lang === 'en'
+                    ? `${dryPercent}% Moisture Deficiency`
+                    : `${dryPercent}% Ubukenerwa bw'Amazi`}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ─ KEY INSIGHT ─ */}
+          <div className="rounded-[1.25rem] border-2 border-emerald-200 bg-gradient-to-r from-emerald-50/80 to-emerald-50/40 p-5">
+            <div className="flex gap-3">
+              <div className="mt-0.5 flex-shrink-0">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100">
+                  <Check className="h-4 w-4 text-emerald-600" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <h4 className="mb-1 text-sm font-bold text-stone-900">
+                  {lang === 'en' ? 'Key Insight' : 'Igitekerezo Cyingenzi'}
+                </h4>
+                <p className="text-sm leading-relaxed text-stone-700">
+                  {lang === 'en' ? diagnosticEn : diagnosticRw}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ─ INPUT REQUIREMENTS (crop-dynamic) ─ */}
+          <div className="rounded-[1.25rem] border border-stone-200 bg-stone-50/60 p-6">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-100">
+                <Ruler className="h-5 w-5 text-sky-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-stone-900">
+                  {lang === 'en' ? 'Input Recommendations' : 'Inama mu Bikoresho'}
+                </h3>
+                <p className="text-xs text-stone-500">
+                  {lang === 'en'
+                    ? `Based on ${areaHa.toFixed(3)} Ha \u00b7 ${crop.labelEn}`
+                    : `Bishingiye kuri ${areaHa.toFixed(3)} Ha \u00b7 ${crop.labelRw}`}
+                </p>
+              </div>
+            </div>
+
+            <div className={`grid gap-3 ${crop.ureaRate > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+              {/* Seed */}
+              <div className="rounded-[0.875rem] border border-stone-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-stone-600">
+                  {lang === 'en' ? 'Seed' : 'Imbuto'}
+                </p>
+                <p className="mt-2 text-xl font-bold text-stone-900">
+                  {seedKg} <span className="text-sm font-normal text-stone-400">kg</span>
+                </p>
+                <p className="mt-1 text-xs text-stone-500">
+                  {crop.seedRate} kg/Ha &times; {areaHa.toFixed(3)} Ha
+                </p>
+              </div>
+
+              {/* NPK */}
+              <div className="rounded-[0.875rem] border border-stone-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-stone-600">
+                  NPK {lang === 'en' ? 'Fertilizer' : 'Ifumbire'}
+                </p>
+                <p className="mt-2 text-xl font-bold text-stone-900">
+                  {npkKg} <span className="text-sm font-normal text-stone-400">kg</span>
+                </p>
+                <p className="mt-1 text-xs text-stone-500">
+                  {crop.npkRate} kg/Ha &times; {areaHa.toFixed(3)} Ha
+                </p>
+              </div>
+
+              {/* Urea (maize only) */}
+              {crop.ureaRate > 0 && (
+                <div className="rounded-[0.875rem] border border-stone-200 bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-stone-600">
+                    {lang === 'en' ? 'Urea' : 'Uyurea'}
+                  </p>
+                  <p className="mt-2 text-xl font-bold text-stone-900">
+                    {ureaKg} <span className="text-sm font-normal text-stone-400">kg</span>
+                  </p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {crop.ureaRate} kg/Ha &times; {areaHa.toFixed(3)} Ha
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <p className="mt-4 text-xs text-stone-400">
+              {lang === 'en'
+                ? 'Formula: Area (Ha) \u00d7 Rate (kg/Ha) \u2014 values calculated from exact polygon surface area.'
+                : 'Ifomula: Ubuso (Ha) \u00d7 Urugero (kg/Ha) \u2014 imibare ivuye ku buso nyabwo bw\u2019umurima.'}
+            </p>
+          </div>
+
+          {/* ─ FOOTER ─ */}
+          <div className="rounded-[1rem] border border-stone-100 bg-stone-50/40 p-4 text-center">
+            <p className="text-xs text-stone-500">
+              {lang === 'en'
+                ? 'Edit boundary to recalculate \u2014 all figures update live as the polygon changes.'
+                : "Hindura umupaka ngo uhitemo \u2014 imibare yose ivugurura ubwayo iyo polygon ihindutse."}
+            </p>
+          </div>
+
         </div>
       )}
     </div>

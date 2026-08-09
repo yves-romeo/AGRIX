@@ -1,289 +1,554 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  ShoppingBag,
-  ChevronDown,
   Search,
   TrendingUp,
-  Calculator,
-  BadgeCheck,
-  Star,
-  MapPin,
+  TrendingDown,
+  Minus,
+  Activity,
   Clock,
-  Send,
-  Store,
-  Scale,
   Layers,
-  ArrowRight,
+  ArrowUpRight,
+  ArrowDownRight,
+  ArrowLeft,
 } from 'lucide-react';
-import {
-  RWANDAN_CROPS,
-  MARKET_DATA,
-  EHAHO_BUYERS,
-  type EhahoBuyer,
-} from '../lib/rwandaData';
-import { SectionCard, Sparkline } from '../components/ui';
-import { useLang } from '../lib/i18n';
+import { RWANDAN_CROPS, CropId, CROP_CATEGORIES } from '../lib/rwandaData';
+import { Sparkline } from '../components/ui';
 
-type Unit = 'Kg' | 'Tons' | 'Sacks';
+interface LivePriceRow {
+  date: string;
+  market: string;
+  location: string;
+  cropId: CropId;
+  price: number;
+  previousPrice?: number;
+}
 
-const UNIT_TO_KG: Record<Unit, number> = {
-  Kg: 1,
-  Tons: 1000,
-  Sacks: 50,
+interface MarketHub {
+  market: string;
+  location: string;
+  price: number;
+  trend: number;
+}
+
+interface CropMarketState {
+  cropId: CropId;
+  hubs: MarketHub[];
+  averagePrice: number;
+  highestPrice: number;
+  lowestPrice: number;
+  lastUpdated: string;
+  series: number[];
+}
+
+const DATA_SOURCE_URL =
+  'https://data.humdata.org/dataset/a4a84c1c-81d1-491b-9fbe-1955ae736508/resource/8c22eeb5-cc2e-46bc-8a0d-08b7486b2486/download/wfp_food_prices_rwa.csv';
+
+const DISTRICT_MARKETS = [
+  'Nyarugenge', 'Kicukiro', 'Gasabo', 'Huye', 'Nyamagabe', 'Nyanza', 'Ruhango', 'Kamonyi', 'Muhanga', 'Gisagara',
+  'Nyaruguru', 'Rusizi', 'Nyamasheke', 'Rubavu', 'Rutsiro', 'Karongi', 'Ngororero', 'Nyabihu', 'Rulindo', 'Gicumbi',
+  'Burera', 'Musanze', 'Gakenke', 'Kirehe', 'Ngoma', 'Kayonza', 'Gatsibo', 'Nyagatare', 'Bugesera', 'Rwamagana',
+];
+
+const FALLBACK_BASE_PRICES: Record<CropId, number> = {
+  ibigori: 320, amasaka: 270, umuceri: 340, ingano: 380, ibishyimbo: 720,
+  imiteja: 760, soya: 520, ubunyobwa: 650, amashaza: 540, ibirayi: 480,
+  ibijumba: 280, imyumbati: 260, imyungu: 230, inyanya: 900, ibitunguru: 520,
+  amashu: 280, karoti: 480, piripiri: 900, ibitoki: 360,
 };
 
-const LOCATIONS = ['Kigali', 'Musanze', 'Huye', 'Bugesera', 'Rubavu', 'Nyabugogo'];
+function createFallbackMarketRows(): LivePriceRow[] {
+  return RWANDAN_CROPS.flatMap((crop) =>
+    DISTRICT_MARKETS.flatMap((district, index) => {
+      const basePrice = FALLBACK_BASE_PRICES[crop.id] ?? 420;
+      const variance = ((index % 7) - 3) * 7 + (crop.name.length % 12);
+      const price = Math.max(220, Math.round(basePrice + variance));
+      const previousPrice = Math.max(190, price - (index % 12) - 3);
+      return [
+        { date: '2026-08-01', market: `${district} Market`, location: district, cropId: crop.id, price, previousPrice },
+        { date: '2026-07-25', market: `${district} Market`, location: district, cropId: crop.id, price: previousPrice },
+      ];
+    }),
+  );
+}
+
+function splitCsvLine(line: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i += 1; continue; }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (char === ',' && !inQuotes) { values.push(current); current = ''; continue; }
+    current += char;
+  }
+  values.push(current);
+  return values.map((v) => v.trim().replace(/^"(.*)"$/, '$1'));
+}
+
+function parseDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value.trim());
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function mapCommodityToCrop(commodity: string | undefined): CropId | undefined {
+  const n = commodity?.toLowerCase() ?? '';
+  if (/maize|corn|ibigori/.test(n)) return 'ibigori';
+  if (/sorghum|amasaka/.test(n)) return 'amasaka';
+  if (/rice|umuceri/.test(n)) return 'umuceri';
+  if (/wheat|ingano/.test(n)) return 'ingano';
+  if (/french bean|imiteja/.test(n)) return 'imiteja';
+  if (/soy|soya|soybeans/.test(n)) return 'soya';
+  if (/groundnut|peanut|ubunyobwa/.test(n)) return 'ubunyobwa';
+  if (/pea|peas|amashaza/.test(n)) return 'amashaza';
+  if (/potato|irish|ibirayi/.test(n)) return 'ibirayi';
+  if (/sweet potato|ibijumba/.test(n)) return 'ibijumba';
+  if (/cassava|imyumbati/.test(n)) return 'imyumbati';
+  if (/yam|imyungu/.test(n)) return 'imyungu';
+  if (/tomato|inyanya/.test(n)) return 'inyanya';
+  if (/onion|ibitunguru/.test(n)) return 'ibitunguru';
+  if (/cabbage|amashu/.test(n)) return 'amashu';
+  if (/carrot|karoti/.test(n)) return 'karoti';
+  if (/pepper|piripiri/.test(n)) return 'piripiri';
+  if (/banana|ibitoki/.test(n)) return 'ibitoki';
+  if (/beans?|ibishyimbo/.test(n)) return 'ibishyimbo';
+  return undefined;
+}
+
+function buildMarketStates(rows: LivePriceRow[]): Record<CropId, CropMarketState> {
+  const latestByKey = new Map<string, { latest: LivePriceRow; previous?: LivePriceRow }>();
+  for (const row of rows) {
+    const date = parseDate(row.date);
+    if (!date) continue;
+    const key = `${row.cropId}|${row.market}`;
+    const entry = latestByKey.get(key);
+    if (!entry) { latestByKey.set(key, { latest: row }); continue; }
+    const existingDate = parseDate(entry.latest.date);
+    if (!existingDate) continue;
+    if (date.getTime() > existingDate.getTime()) { entry.previous = entry.latest; entry.latest = row; continue; }
+    const prevDate = parseDate(entry.previous?.date);
+    if (!entry.previous || (prevDate && date.getTime() > prevDate.getTime())) entry.previous = row;
+  }
+
+  const grouped = RWANDAN_CROPS.reduce((acc, c) => { acc[c.id] = []; return acc; }, {} as Record<CropId, LivePriceRow[]>);
+  for (const { latest, previous } of latestByKey.values()) {
+    grouped[latest.cropId].push(previous ? { ...latest, previousPrice: previous.price } : { ...latest });
+  }
+
+  const states = {} as Record<CropId, CropMarketState>;
+  for (const crop of RWANDAN_CROPS) {
+    const cropRows = grouped[crop.id];
+    const hubs: MarketHub[] = cropRows
+      .map((row) => ({
+        market: row.market,
+        location: row.location || row.market,
+        price: row.price,
+        trend: row.previousPrice ? ((row.price - row.previousPrice) / row.previousPrice) * 100 : 0,
+      }))
+      .sort((a, b) => b.price - a.price);
+
+    const prices = hubs.map((h) => h.price);
+    const averagePrice = prices.length ? Math.round(prices.reduce((s, p) => s + p, 0) / prices.length) : 0;
+    const highestPrice = prices.length ? Math.max(...prices) : 0;
+    const lowestPrice = prices.length ? Math.min(...prices) : 0;
+    const latestDate = cropRows.map((r) => parseDate(r.date)).filter((d): d is Date => d !== null).sort((a, b) => b.getTime() - a.getTime())[0];
+    const series = cropRows.map((r) => r.price).sort((a, b) => a - b).slice(0, 12);
+
+    states[crop.id] = {
+      cropId: crop.id,
+      hubs,
+      averagePrice,
+      highestPrice,
+      lowestPrice,
+      lastUpdated: latestDate ? formatDate(latestDate) : '',
+      series: series.length > 1 ? series : [averagePrice, averagePrice],
+    };
+  }
+  return states;
+}
+
+// ── shared color tokens (soft white-blue) ──
+const C = {
+  ink: '#334155',        // main text
+  inkDeep: '#1e293b',    // headings
+  sub: '#64748b',        // secondary text
+  faint: '#94a3b8',      // tertiary
+  blue: '#3b82f6',       // primary accent
+  blueDeep: '#2563eb',   // hover/active
+  blueSoft: '#93c5fd',   // light accent
+  blueTint: '#dbeafe',   // chip bg
+  blueMist: '#eff6ff',   // lightest bg
+  card: '#ffffff',
+  border: '#e2e8f0',
+  borderBlue: '#bfdbfe',
+};
 
 export function AgriMarketView() {
-  const { t } = useLang();
-  const [cropId, setCropId] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [unit, setUnit] = useState<Unit>('Kg');
-  const [location, setLocation] = useState('');
-  const [submitted, setSubmitted] = useState(false);
+  const [selectedCrop, setSelectedCrop] = useState<CropId | null>(null);
+  const [cropSearch, setCropSearch] = useState('');
+  const [marketStates, setMarketStates] = useState<Record<CropId, CropMarketState> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fallback, setFallback] = useState(false);
+  const [updateTimestamp, setUpdateTimestamp] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('All');
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cropId || !quantity || !location) return;
-    setSubmitted(true);
-  };
+  useEffect(() => {
+    let canceled = false;
+    const fetchPrices = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(DATA_SOURCE_URL);
+        if (!response.ok) throw new Error('fetch failed');
+        const csv = await response.text();
+        const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        if (lines.length < 2) throw new Error('empty');
+        const header = splitCsvLine(lines[0]);
+        const norm = header.map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+        const parsed: LivePriceRow[] = [];
+        for (const line of lines.slice(1)) {
+          const vals = splitCsvLine(line);
+          if (vals.length !== norm.length) continue;
+          const rec = norm.reduce<Record<string, string>>((acc, k, i) => { acc[k] = vals[i] ?? ''; return acc; }, {});
+          const commodity = rec.commodity || rec.commodity_name || rec.item || rec.item_name;
+          const cropId = mapCommodityToCrop(commodity);
+          if (!cropId) continue;
+          const unit = (rec.unit || rec.unit_of_measure || '').toLowerCase();
+          const currency = (rec.currency || rec.local_currency || '').toLowerCase();
+          if (!currency.includes('rwf') || !unit.includes('kg')) continue;
+          const priceValue = Number((rec.price || rec.value || '').replace(/[^0-9.\-]/g, ''));
+          if (!priceValue || Number.isNaN(priceValue)) continue;
+          const date = rec.date || rec.reference_date || '';
+          const market = rec.market || rec.market_name || rec.location || '';
+          const location = rec.location || rec.admin_area || market;
+          if (!market) continue;
+          parsed.push({ date, market, location, cropId, price: priceValue });
+        }
+        const remote = buildMarketStates(parsed);
+        if (!canceled && Object.values(remote).some((e) => e.hubs.length > 0)) {
+          setMarketStates(remote);
+          setFallback(false);
+        } else {
+          throw new Error('no rows');
+        }
+      } catch {
+        if (!canceled) {
+          setMarketStates(buildMarketStates(createFallbackMarketRows()));
+          setFallback(true);
+        }
+      } finally {
+        if (!canceled) {
+          setUpdateTimestamp(new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
+          setLoading(false);
+        }
+      }
+    };
+    fetchPrices();
+    return () => { canceled = true; };
+  }, []);
 
-  const crop = RWANDAN_CROPS.find((c) => c.id === cropId);
-  const market = cropId ? MARKET_DATA[cropId] : null;
-  const qtyKg = quantity ? Number(quantity) * UNIT_TO_KG[unit] : 0;
-  const totalValue = market ? qtyKg * market.averagePrice : 0;
-  const matchedBuyers = cropId ? EHAHO_BUYERS.filter((b) => b.crops.includes(cropId)) : [];
+  const selectedMeta = selectedCrop ? RWANDAN_CROPS.find((c) => c.id === selectedCrop) : null;
+  const selectedState = selectedCrop ? marketStates?.[selectedCrop] : null;
 
-  return (
-    <div className="space-y-5">
-      {/* Top: input form */}
-      <SectionCard
-        title={t.amTitle}
-        subtitle={t.amSubtitle}
-        action={<span className="chip bg-forest-50 text-forest-700"><Store className="h-3.5 w-3.5" /> eHaho · TangaBid</span>}
-      >
-        <form onSubmit={handleSubmit} className="grid sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-3 items-end">
-          <Field label={t.amCrop} icon={Layers}>
-            <Select value={cropId} onChange={(v) => { setCropId(v); setSubmitted(false); }} placeholder={t.amSelectCrop}>
-              {RWANDAN_CROPS.map((c) => (
-                <option key={c.id} value={c.id}>{c.emoji}  {c.name}</option>
-              ))}
-            </Select>
-          </Field>
+  const filteredCrops = useMemo(() => {
+    let list = RWANDAN_CROPS;
+    if (activeCategory !== 'All') list = list.filter((c) => c.category === activeCategory);
+    if (cropSearch.trim()) {
+      const s = cropSearch.trim().toLowerCase();
+      list = list.filter((c) => c.name.toLowerCase().includes(s) || c.english.toLowerCase().includes(s) || c.id.includes(s));
+    }
+    return list;
+  }, [activeCategory, cropSearch]);
 
-          <Field label={t.amQuantity} icon={Scale}>
-            <input
-              type="number"
-              min="1"
-              value={quantity}
-              onChange={(e) => { setQuantity(e.target.value); setSubmitted(false); }}
-              placeholder="e.g. 500"
-              required
-              className="w-full rounded-xl border border-slate2-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-forest-500 focus:border-forest-500 transition-all"
-            />
-          </Field>
+  const sortedCrops = useMemo(() => {
+    return [...filteredCrops].sort((a, b) => {
+      const pa = marketStates?.[a.id]?.averagePrice ?? 0;
+      const pb = marketStates?.[b.id]?.averagePrice ?? 0;
+      return pb - pa;
+    });
+  }, [filteredCrops, marketStates]);
 
-          <Field label={t.amUnit}>
-            <Select value={unit} onChange={(v) => setUnit(v as Unit)}>
-              <option value="Kg">Kg</option>
-              <option value="Tons">Tons</option>
-              <option value="Sacks">Sacks</option>
-            </Select>
-          </Field>
+  // ── DETAIL PAGE ──
+  if (selectedCrop && selectedMeta && selectedState) {
+    return (
+      <div className="min-h-screen w-full" style={{ background: 'linear-gradient(160deg, #f0f7ff 0%, #f8fbff 50%, #ffffff 100%)' }}>
+        {/* soft ambient */}
+        <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+          <div className="absolute -top-32 right-1/4 h-[32rem] w-[32rem] rounded-full opacity-30" style={{ background: 'radial-gradient(circle, #bfdbfe, transparent 70%)' }} />
+          <div className="absolute bottom-0 -left-20 h-[28rem] w-[28rem] rounded-full opacity-20" style={{ background: 'radial-gradient(circle, #93c5fd, transparent 70%)' }} />
+        </div>
 
-          <Field label={t.amLocation} icon={MapPin}>
-            <Select value={location} onChange={(v) => { setLocation(v); setSubmitted(false); }} placeholder={t.amSelectCrop}>
-              {LOCATIONS.map((l) => (
-                <option key={l} value={l}>{l}</option>
-              ))}
-            </Select>
-          </Field>
+        {/* Header with back button */}
+        <header className="sticky top-0 z-30 border-b" style={{ borderColor: C.borderBlue, background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(20px)' }}>
+          <div className="mx-auto flex max-w-[900px] items-center gap-4 px-6 py-4">
+            <button
+              onClick={() => setSelectedCrop(null)}
+              className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition"
+              style={{ color: C.blueDeep, background: C.blueMist, border: `1px solid ${C.borderBlue}` }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = C.blueTint; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = C.blueMist; }}
+            >
+              <ArrowLeft className="h-4 w-4" /> Back
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">{selectedMeta.emoji}</span>
+              <h1 className="text-lg font-black" style={{ color: C.inkDeep }}>{selectedMeta.name}</h1>
+            </div>
+          </div>
+        </header>
 
-          <button type="submit" className="btn-primary h-[46px] whitespace-nowrap">
-            <Search className="h-4 w-4" /> {t.amSearch}
-          </button>
-        </form>
-      </SectionCard>
+        <main className="mx-auto max-w-[900px] px-6 py-8">
+          {/* Hero card */}
+          <div className="relative overflow-hidden rounded-3xl p-7"
+            style={{
+              background: 'linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)',
+              border: `1.5px solid ${C.borderBlue}`,
+              boxShadow: '0 8px 32px rgba(59,130,246,0.10)',
+            }}>
+            <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full opacity-30"
+              style={{ background: 'radial-gradient(circle, #bfdbfe, transparent 70%)' }} />
 
-      {submitted && crop && market ? (
-        <div className="space-y-5 animate-fade-in">
-          {/* Summary header */}
-          <div className="card p-4 sm:p-5 bg-gradient-to-br from-forest-950 to-forest-800 text-white border-forest-950">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="grid place-items-center h-12 w-12 rounded-xl bg-white/10 text-2xl">{crop.emoji}</div>
-                <div>
-                  <p className="font-display font-bold text-lg leading-tight">{crop.name}</p>
-                  <p className="text-xs text-forest-300">
-                    {crop.english} · {Number(quantity).toLocaleString()} {unit} ({qtyKg.toLocaleString()} kg) · {location}
-                  </p>
-                </div>
+            <div className="relative flex items-start justify-between gap-6">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.3em]" style={{ color: C.blue }}>
+                  {selectedMeta.category}
+                </p>
+                <h2 className="mt-2 text-4xl font-black tracking-tight" style={{ color: C.inkDeep }}>{selectedMeta.name}</h2>
+                <p className="mt-1 text-sm font-medium" style={{ color: C.sub }}>{selectedMeta.english}</p>
               </div>
               <div className="text-right">
-                <p className="text-[11px] text-forest-300">{t.amEstimatedTotal}</p>
-                <p className="font-display font-extrabold text-2xl text-accent-lime">
-                  {totalValue.toLocaleString()} <span className="text-sm font-semibold">RWF</span>
+                <p className="text-[11px] font-black uppercase tracking-widest" style={{ color: C.faint }}>Avg Price</p>
+                <p className="mt-1 text-5xl font-black" style={{ color: C.blueDeep }}>
+                  {selectedState.averagePrice.toLocaleString()}
                 </p>
+                <p className="text-xs font-semibold" style={{ color: C.faint }}>RWF / kg</p>
               </div>
+            </div>
+
+            {/* Stat tiles */}
+            <div className="relative mt-6 grid grid-cols-3 gap-3">
+              <DetailStatTile label="Highest" value={selectedState.highestPrice.toLocaleString()} icon={<ArrowUpRight className="h-4 w-4" />} accent="#10b981" />
+              <DetailStatTile label="Lowest" value={selectedState.lowestPrice.toLocaleString()} icon={<ArrowDownRight className="h-4 w-4" />} accent="#f43f5e" />
+              <DetailStatTile label="Markets" value={String(selectedState.hubs.length)} icon={<Layers className="h-4 w-4" />} accent={C.blue} />
+            </div>
+
+            <div className="relative mt-5 flex items-center gap-1.5 text-xs font-medium" style={{ color: C.faint }}>
+              <Clock className="h-3.5 w-3.5" />
+              Last updated {selectedState.lastUpdated || updateTimestamp}
             </div>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-5">
-            {/* TangaBid Price Intelligence */}
-            <SectionCard
-              title={t.amTangaBid}
-              subtitle="Verified market rates across local hubs"
-              action={<span className="chip bg-sky-50 text-sky-700"><TrendingUp className="h-3.5 w-3.5" /> {t.amLive}</span>}
-            >
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-3 rounded-xl bg-forest-50/60 border border-forest-100">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wider text-slate2-500 font-semibold">{t.amAvgPrice}</p>
-                    <p className="font-display font-bold text-2xl text-forest-700">
-                      {market.averagePrice.toLocaleString()} <span className="text-sm font-semibold text-slate2-500">{market.unit}</span>
-                    </p>
+          {/* Market breakdown */}
+          <div className="mt-5 rounded-3xl p-6"
+            style={{ background: C.card, border: `1.5px solid ${C.border}`, boxShadow: '0 4px 20px rgba(0,0,0,0.04)' }}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-base font-black" style={{ color: C.inkDeep }}>Market breakdown</h3>
+              <span className="text-xs font-semibold" style={{ color: C.faint }}>Sorted highest to lowest</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {selectedState.hubs.map((hub) => {
+                const max = selectedState.highestPrice || 1;
+                const pct = (hub.price / max) * 100;
+                return (
+                  <div key={hub.market} className="rounded-2xl p-3.5 transition"
+                    style={{ background: C.blueMist, border: `1px solid ${C.border}` }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.blueSoft; e.currentTarget.style.background = C.blueTint; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.blueMist; }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold" style={{ color: C.inkDeep }}>{hub.market}</p>
+                        <p className="text-xs font-medium" style={{ color: C.faint }}>{hub.location}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black" style={{ color: C.blueDeep }}>{hub.price.toLocaleString()}</span>
+                        <span className="text-[11px] font-medium" style={{ color: C.faint }}>RWF/kg</span>
+                        <TrendBadge trend={hub.trend} />
+                      </div>
+                    </div>
+                    <div className="mt-2.5 h-1.5 overflow-hidden rounded-full" style={{ background: C.blueTint }}>
+                      <div className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${C.blue}, ${C.blueSoft})` }} />
+                    </div>
                   </div>
-                  <Sparkline data={market.trend} color="#2f8d62" width={90} height={36} />
-                </div>
-
-                <div className="overflow-hidden rounded-xl border border-slate2-200">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate2-50 text-[11px] uppercase tracking-wider text-slate2-500">
-                      <tr>
-                        <th className="text-left font-semibold px-3 py-2">{t.amHub}</th>
-                        <th className="text-left font-semibold px-3 py-2 hidden sm:table-cell">{t.amHubLocation}</th>
-                        <th className="text-right font-semibold px-3 py-2">{t.amPricePerKg}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate2-100">
-                      {market.hubs.map((h) => (
-                        <tr key={h.name} className="hover:bg-slate2-50 transition-colors">
-                          <td className="px-3 py-2.5 font-medium text-slate2-800">{h.name}</td>
-                          <td className="px-3 py-2.5 text-slate2-500 hidden sm:table-cell">{h.location}</td>
-                          <td className="px-3 py-2.5 text-right font-semibold text-slate2-900">{h.pricePerKg.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="p-4 rounded-xl border-2 border-forest-200 bg-forest-50/40">
-                  <p className="flex items-center gap-1.5 text-xs font-bold text-forest-700 uppercase tracking-wider mb-3">
-                    <Calculator className="h-4 w-4" /> {t.amTotalEval}
-                  </p>
-                  <div className="flex items-center gap-2 text-sm text-slate2-700 flex-wrap">
-                    <span className="font-semibold">{qtyKg.toLocaleString()} kg</span>
-                    <span className="text-slate2-400">×</span>
-                    <span className="font-semibold">{market.averagePrice.toLocaleString()} RWF/kg</span>
-                    <ArrowRight className="h-4 w-4 text-forest-600" />
-                    <span className="font-display font-extrabold text-forest-700 text-lg">
-                      {totalValue.toLocaleString()} RWF
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-
-            {/* eHaho Buyer Network */}
-            <SectionCard
-              title={t.amBuyers}
-              subtitle={`${matchedBuyers.length} ${t.amVerified.toLowerCase()} · ${crop.name}`}
-              action={<span className="chip bg-forest-50 text-forest-700"><BadgeCheck className="h-3.5 w-3.5" /> {t.amVerified}</span>}
-            >
-              {matchedBuyers.length === 0 ? (
-                <div className="text-center py-8 px-4 rounded-xl border border-dashed border-slate2-200">
-                  <p className="text-sm text-slate2-500">{t.amNoBuyers}</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {matchedBuyers.map((b) => (
-                    <BuyerCard key={b.id} buyer={b} qtyKg={qtyKg} t={t} />
-                  ))}
-                </div>
-              )}
-            </SectionCard>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="card p-10 text-center">
-          <div className="grid place-items-center h-14 w-14 rounded-2xl bg-forest-50 text-forest-600 mx-auto mb-4">
-            <ShoppingBag className="h-7 w-7" />
-          </div>
-          <p className="font-display font-semibold text-slate2-900">{t.amEmptyTitle}</p>
-          <p className="text-sm text-slate2-500 mt-1 max-w-md mx-auto">{t.amEmptyBody}</p>
-        </div>
-      )}
-    </div>
-  );
-}
+        </main>
+      </div>
+    );
+  }
 
-function Field({ label, icon: Icon, children }: { label: string; icon?: typeof Layers; children: React.ReactNode }) {
+  // ── LIST PAGE (full screen) ──
   return (
-    <div>
-      <label className="text-[11px] font-semibold text-slate2-600 mb-1 flex items-center gap-1">
-        {Icon && <Icon className="h-3 w-3" />} {label}
-      </label>
-      {children}
-    </div>
-  );
-}
+    <div className="min-h-screen w-full" style={{ background: 'linear-gradient(160deg, #f0f7ff 0%, #f8fbff 50%, #ffffff 100%)' }}>
+      {/* soft ambient */}
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+        <div className="absolute -top-40 -left-32 h-[38rem] w-[38rem] rounded-full opacity-25" style={{ background: 'radial-gradient(circle, #bfdbfe, transparent 70%)' }} />
+        <div className="absolute top-1/2 -right-32 h-[32rem] w-[32rem] rounded-full opacity-20" style={{ background: 'radial-gradient(circle, #93c5fd, transparent 70%)' }} />
+      </div>
 
-function Select({ value, onChange, placeholder, children }: { value: string; onChange: (v: string) => void; placeholder?: string; children: React.ReactNode }) {
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        required={!placeholder}
-        className="w-full appearance-none rounded-xl border border-slate2-200 px-3 py-2.5 pr-9 text-sm font-medium text-slate2-800 focus:outline-none focus:ring-2 focus:ring-forest-500 focus:border-forest-500 transition-all bg-white"
-      >
-        {placeholder && (
-          <option value="" disabled>{placeholder}</option>
-        )}
-        {children}
-      </select>
-      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate2-400 pointer-events-none" />
-    </div>
-  );
-}
-
-function BuyerCard({ buyer: b, qtyKg, t }: { buyer: EhahoBuyer; qtyKg: number; t: ReturnType<typeof useLang>['t'] }) {
-  const [sent, setSent] = useState(false);
-  const meetsMin = qtyKg >= b.minVolumeKg;
-  return (
-    <div className="p-4 rounded-xl border border-slate2-200 hover:border-forest-300 hover:shadow-soft transition-all">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex items-start gap-3">
-          <div className="grid place-items-center h-11 w-11 rounded-xl bg-forest-600 text-white font-display font-bold text-lg shrink-0">
-            {b.name.charAt(0)}
-          </div>
+      {/* Header */}
+      <header className="sticky top-0 z-30 border-b" style={{ borderColor: C.borderBlue, background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(20px)' }}>
+        <div className="mx-auto flex max-w-[1100px] items-center justify-between gap-4 px-6 py-4">
           <div>
-            <div className="flex items-center gap-1.5">
-              <p className="font-display font-bold text-slate2-900">{b.name}</p>
-              {b.verified && <BadgeCheck className="h-4 w-4 text-forest-600" />}
+            <h1 className="text-xl font-black tracking-tight" style={{ color: C.inkDeep }}>
+              AgriMarket <span style={{ color: C.blue }}>Hub</span>
+            </h1>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: C.faint }}>
+              Rwanda Commodity Intelligence
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-2 rounded-full px-3 py-1.5 shadow-sm sm:flex"
+              style={{ border: `1px solid ${C.borderBlue}`, background: C.blueMist }}>
+              <span className={`h-2 w-2 rounded-full ${loading ? 'bg-amber-400 animate-pulse' : fallback ? 'bg-amber-400' : 'animate-pulse'}`}
+                style={!loading && !fallback ? { background: C.blue } : undefined} />
+              <span className="text-xs font-semibold" style={{ color: C.blueDeep }}>
+                {loading ? 'Syncing…' : fallback ? 'Offline sample data' : 'Live MINAGRI / WFP'}
+              </span>
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-slate2-500 mt-0.5">
-              <span className="flex items-center gap-0.5"><MapPin className="h-3 w-3" /> {b.location}</span>
-              <span className="flex items-center gap-0.5"><Star className="h-3 w-3 text-amber-500 fill-amber-500" /> {b.rating}</span>
-              <span className="flex items-center gap-0.5"><Clock className="h-3 w-3" /> {b.responseTime}</span>
+            <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 shadow-sm"
+              style={{ border: `1px solid ${C.borderBlue}`, background: C.blueMist }}>
+              <Clock className="h-3.5 w-3.5" style={{ color: C.blue }} />
+              <span className="text-xs font-medium" style={{ color: C.sub }}>{updateTimestamp || 'Loading…'}</span>
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setSent(true)}
-          disabled={sent}
-          className={`btn-primary !py-2 !px-3 text-xs whitespace-nowrap ${!meetsMin ? 'opacity-60' : ''}`}
-        >
-          {sent ? <>✓ {t.amOfferSent}</> : <><Send className="h-3.5 w-3.5" /> {t.amSubmitOffer}</>}
-        </button>
-      </div>
-      <div className="mt-3 pt-3 border-t border-slate2-100 flex flex-wrap items-center gap-2">
-        <span className="chip bg-slate2-100 text-slate2-700"><Clock className="h-3 w-3" /> {b.orderCycle}</span>
-        <span className="chip bg-forest-50 text-forest-700">{b.priceOffer}</span>
-        <span className={`chip ${meetsMin ? 'bg-forest-50 text-forest-700' : 'bg-amber-50 text-amber-700'}`}>
-          {t.amMinVolume}: {b.minVolumeKg.toLocaleString()} kg
-        </span>
-      </div>
+      </header>
+
+      <main className="mx-auto max-w-[1100px] px-6 py-8">
+        {/* Title row */}
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-3xl font-black tracking-tight" style={{ color: C.inkDeep }}>Commodity Prices</h2>
+            <p className="mt-1 text-sm font-medium" style={{ color: C.faint }}>Average price per kg · click any crop to see details</p>
+          </div>
+          <span className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
+            style={{ background: C.blueTint, color: C.blueDeep, border: `1px solid ${C.blueSoft}` }}>
+            <Activity className="h-3.5 w-3.5" /> {RWANDAN_CROPS.length} crops
+          </span>
+        </div>
+
+        {/* Search */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: C.blueSoft }} />
+          <input
+            value={cropSearch}
+            onChange={(e) => setCropSearch(e.target.value)}
+            placeholder="Search crops by name…"
+            className="w-full rounded-2xl py-3 pl-10 pr-4 text-sm font-medium outline-none transition"
+            style={{ border: `1.5px solid ${C.borderBlue}`, background: C.card, color: C.inkDeep, boxShadow: '0 2px 8px rgba(59,130,246,0.06)' }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(59,130,246,0.10)`; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = C.borderBlue; e.currentTarget.style.boxShadow = '0 2px 8px rgba(59,130,246,0.06)'; }}
+          />
+        </div>
+
+        {/* Category chips */}
+        <div className="mb-6 flex flex-wrap gap-2">
+          {['All', ...CROP_CATEGORIES].map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className="rounded-full px-3.5 py-1.5 text-xs font-bold transition-all"
+              style={
+                activeCategory === cat
+                  ? { background: C.blue, color: '#ffffff', boxShadow: '0 3px 10px rgba(59,130,246,0.20)' }
+                  : { background: C.card, color: C.blue, border: `1.5px solid ${C.borderBlue}` }
+              }
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        {/* Crop grid — 2 columns on desktop */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {loading
+            ? Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-20 animate-pulse rounded-2xl" style={{ background: `${C.blueTint}55`, border: `1px solid ${C.borderBlue}` }} />
+              ))
+            : sortedCrops.map((crop) => {
+                const state = marketStates?.[crop.id];
+                return (
+                  <button
+                    key={crop.id}
+                    onClick={() => setSelectedCrop(crop.id)}
+                    className="group flex w-full items-center gap-4 rounded-2xl p-4 text-left transition-all duration-200"
+                    style={{ background: C.card, border: `1.5px solid ${C.border}`, boxShadow: '0 1px 4px rgba(0,0,0,0.03)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.blueSoft; e.currentTarget.style.boxShadow = '0 4px 16px rgba(59,130,246,0.10)'; e.currentTarget.style.background = C.blueMist; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.03)'; e.currentTarget.style.background = C.card; }}
+                  >
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl"
+                      style={{ background: C.blueMist }}>
+                      {crop.emoji}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-bold" style={{ color: C.inkDeep }}>{crop.name}</p>
+                        <span className="hidden text-xs sm:inline" style={{ color: C.faint }}>· {crop.english}</span>
+                      </div>
+                      <p className="mt-0.5 text-xs font-medium" style={{ color: C.faint }}>{crop.category}</p>
+                    </div>
+
+                    <div className="hidden w-20 sm:block" style={{ color: C.blue }}>
+                      {state && <Sparkline data={state.series} className="h-8 w-full" />}
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-base font-black" style={{ color: C.inkDeep }}>
+                        {state ? state.averagePrice.toLocaleString() : '—'}
+                      </p>
+                      <p className="text-[11px] font-medium" style={{ color: C.faint }}>RWF / kg</p>
+                    </div>
+                  </button>
+                );
+              })}
+        </div>
+      </main>
     </div>
+  );
+}
+
+function DetailStatTile({ label, value, icon, accent }: { label: string; value: string; icon: React.ReactNode; accent: string }) {
+  return (
+    <div className="rounded-2xl p-3.5" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-1.5" style={{ color: accent }}>
+        {icon}
+        <span className="text-[11px] font-black uppercase tracking-wider" style={{ color: C.faint }}>{label}</span>
+      </div>
+      <p className="mt-1.5 text-2xl font-black" style={{ color: C.inkDeep }}>{value}</p>
+    </div>
+  );
+}
+
+function TrendBadge({ trend }: { trend: number }) {
+  const rounded = Math.round(trend * 10) / 10;
+  if (Math.abs(rounded) < 0.1) {
+    return (
+      <span className="flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold"
+        style={{ background: '#f1f5f9', color: '#94a3b8' }}>
+        <Minus className="h-3 w-3" /> 0%
+      </span>
+    );
+  }
+  const up = rounded > 0;
+  return (
+    <span className="flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-bold"
+      style={up
+        ? { background: C.blueTint, color: C.blueDeep }
+        : { background: '#fee2e2', color: '#dc2626' }}>
+      {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+      {up ? '+' : ''}{rounded}%
+    </span>
   );
 }

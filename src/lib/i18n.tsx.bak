@@ -26,7 +26,6 @@ export interface Translation {
   aiAnalyzingSub: string;
   aiRejected: string;
   aiRejectEn: string;
-  satModerate: string;
   aiRejectRw: string;
   aiTryAgain: string;
   aiResult: string;
@@ -99,7 +98,6 @@ export interface Translation {
   amEmptyTitle: string;
   amEmptyBody: string;
   amSelectCrop: string;
-  amSelectLocation: string;
   amEstimatedTotal: string;
   // Satellite
   satTitle: string;
@@ -136,9 +134,9 @@ export interface Translation {
   satAcres: string;
   satCropHealth: string;
   satHighChloro: string;
-  satNonAgricultural: string;
   satSoilMoistureEst: string;
   satFieldCapacity: string;
+  satModerate: string;
   satOptimal: string;
   satDeficiency: string;
   satVegHeatmap: string;
@@ -181,16 +179,16 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     brand: 'AGRI X',
     tagline: 'Farm Intelligence',
     navAICenter: 'AI Center',
-    navAICenterDesc: 'Scanner + AI chat',
+    navAICenterDesc: 'Scanner + RAG chat',
     navLand: 'Land Analytics',
     navLandDesc: 'Satellite plots',
-    navTelemetry: 'Quantum Device',
+    navTelemetry: 'Telemetry IoT Hub',
     navTelemetryDesc: 'Hardware metrics',
     navAgriMarket: 'AgriMarket Hub',
     navAgriMarketDesc: 'Crop pricing & buyers',
     switchTo: 'Kinyarwanda',
     aiTitle: 'AI Center — Scan & Ask',
-    aiSubtitle: 'Upload a crop photo for disease diagnostics, then get verified agronomy answers.',
+    aiSubtitle: 'Upload a crop photo for disease diagnostics, then get verified agronomy answers from RAB/MINAGRI.',
     aiTakePhoto: 'Take Photo',
     aiUpload: 'Upload Image',
     aiAnalyzing: 'Analyzing crop tissue…',
@@ -211,8 +209,8 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     aiMicIdle: 'Tap to speak',
     aiMicRecording: 'Listening…',
     aiMicTranscribing: 'Transcribing…',
-    aiTabScanner: 'Crop Scanner',
-    aiTabAssistant: 'Agri AI Assistant',
+    aiTabScanner: '📸 Crop Scanner',
+    aiTabAssistant: '🤖 Agri AI Assistant',
     aiChatPlaceholder: 'Ask about soil health, pests, weather, or crops...',
     aiVoiceLang: 'Voice Input Language',
     aiListening: 'Listening... Speak now',
@@ -220,7 +218,7 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     aiStopTTS: 'Stop Audio',
     aiSpeechNotSupported: 'Speech Recognition is not supported or permission denied.',
     aiAssistantGreeting: 'Hello! I am your Agri AI Assistant. How can I help you with your crops, soil, or pest control today?',
-    aiApiKeyMissing: 'API key is not configured.',
+    aiApiKeyMissing: 'Gemini API key is not configured. Add VITE_GEMINI_API_KEY to your .env file to enable AI features.',
     aiApiKeyBannerDismiss: 'Dismiss',
     aiNetworkError: 'Network error — could not reach Gemini AI. Check your connection and try again.',
     aiGeminiRequired: 'Configure VITE_GEMINI_API_KEY to use live AI analysis and chat.',
@@ -230,12 +228,12 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     aiTreatment: 'Treatment',
     aiOrganic: 'Organic Options',
     aiChemical: 'Chemical Options',
-    telTitle: 'Quantum',
-    telSubtitle: 'Live sensor readings from AgroQuantum field devices',
+    telTitle: 'Telemetry IoT Hub',
+    telSubtitle: 'Live sensor readings from AgroNode field devices',
     telSoil: 'Soil Moisture',
     telTemp: 'Ambient Temperature',
     telHumidity: 'Relative Humidity',
-    telConnected: 'Device Connected: AgroQuantum',
+    telConnected: 'Device Connected: AgroNode-v1',
     telDisconnected: 'No device connected',
     telPairDevice: 'Pair Device',
     telPaired: 'Paired',
@@ -267,7 +265,6 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     amEmptyTitle: 'Enter crop details to begin',
     amEmptyBody: 'Click "Find Buyers or Price" to load TangaBid market rates and eHaho verified buyers.',
     amSelectCrop: 'Select a crop…',
-    amSelectLocation: 'Select a location…',
     amEstimatedTotal: 'Estimated total value',
     satTitle: 'Land Analytics',
     satSubtitle: 'Satellite vegetation intelligence',
@@ -302,7 +299,6 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     satAcres: 'Ac',
     satCropHealth: 'Crop Health Index',
     satHighChloro: 'High Chlorophyll / Healthy',
-    satNonAgricultural: 'Non-Agricultural Land',
     satSoilMoistureEst: 'Soil Moisture Estimate',
     satFieldCapacity: 'Field Capacity',
     satModerate: 'Moderate',
@@ -432,7 +428,6 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     amEmptyTitle: 'Shyiramo amakuru y\'igihingwa',
     amEmptyBody: 'Kanda "Shaka Abaguzi cyangwa Igiciro" kugira ngo ubone ibiciro n\'abaguzi bemewe.',
     amSelectCrop: 'Hitamo igihingwa…',
-    amSelectLocation: 'Hitamo aho biherereye…',
     amEstimatedTotal: 'agaciro kose hamwe',
     welcomeHeroEyebrow: 'Ikoranabuhanga ry\'ubuhinzi bugezweho ',
     welcomeHeroTitle: 'Ubuhinzi.',
@@ -474,7 +469,6 @@ export const TRANSLATIONS: Record<Lang, Translation> = {
     satAcres: 'Ac',
     satCropHealth: 'Ubuzima bw\'ibihingwa',
     satHighChloro: 'Chlorophyll ninini / Byiza',
-    satNonAgricultural: 'Ubutaka butari bwo guhinga',
     satSoilMoistureEst: 'Igereranya ry\'ubuhehere bw\'ubutaka',
     satFieldCapacity: 'Ubushobozi bw\'ubutaka',
     satModerate: 'Hagati',

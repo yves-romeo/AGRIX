@@ -4,7 +4,7 @@ import { LanguageProvider, useLang } from './lib/i18n';
 import { WelcomeView } from './views/WelcomeView';
 import { AICenterView } from './views/AICenterView';
 import { SatelliteView } from './views/SatelliteView';
-import  TelemetryView  from './views/TelemetryView';
+import { TelemetryView } from './views/TelemetryView';
 import { AgriMarketView } from './views/AgriMarketView';
 import { Leaf, Menu, X, Languages } from 'lucide-react';
 
@@ -58,6 +58,24 @@ function Workspace() {
           </button>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
+          {/* Home tab at the top */}
+          <button
+            onClick={goHome}
+            className={`w-full group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+              false
+                ? 'bg-forest-50 text-forest-800 shadow-soft'
+                : 'text-slate2-600 hover:bg-slate2-50 hover:text-slate2-900'
+            }`}
+          >
+            <span className="grid place-items-center h-9 w-9 rounded-lg bg-slate2-100 text-slate2-500 group-hover:bg-slate2-200">
+              <Leaf className="h-4.5 w-4.5" strokeWidth={2} />
+            </span>
+            <span className="flex flex-col items-start">
+              <span className="font-semibold leading-tight">{lang === 'en' ? 'Home' : 'Ahabanza'}</span>
+              <span className="text-[11px] text-slate2-400 leading-tight">{lang === 'en' ? 'Welcome page' : 'Paji yo kwakirwa'}</span>
+            </span>
+          </button>
+
           <div className="my-2 border-t border-slate2-100" />
 
           {NAV_ITEMS.map((item) => {
@@ -68,14 +86,14 @@ function Workspace() {
               <button
                 key={item.id}
                 onClick={() => setView(item.id)}
-                className={`w-full group flex items-center gap-3 rounded-full px-4 py-2 text-sm font-medium transition-all border ${
+                className={`w-full group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
                   isActive
-                    ? 'bg-forest-50 text-forest-800 shadow-soft border-transparent'
-                    : 'text-slate2-600 border-slate2-100 hover:bg-slate2-50 hover:text-slate2-900'
+                    ? 'bg-forest-50 text-forest-800 shadow-soft'
+                    : 'text-slate2-600 hover:bg-slate2-50 hover:text-slate2-900'
                 }`}
               >
                 <span
-                  className={`grid place-items-center h-8 w-8 rounded-full transition-colors ${
+                  className={`grid place-items-center h-9 w-9 rounded-lg transition-colors ${
                     isActive ? 'bg-forest-600 text-white' : 'bg-slate2-100 text-slate2-500 group-hover:bg-slate2-200'
                   }`}
                 >
@@ -136,7 +154,13 @@ function Workspace() {
           <div className="absolute inset-0 bg-slate2-900/40 backdrop-blur-sm" onClick={() => setMobileNavOpen(false)} />
           <div className="absolute top-14 right-0 w-72 max-w-[80vw] bg-white shadow-card rounded-bl-2xl rounded-br-2xl p-3 animate-fade-in">
             <p className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider font-semibold text-slate2-400">Navigation</p>
-            
+            <button
+              onClick={goHome}
+              className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors text-slate2-700 hover:bg-slate2-50"
+            >
+              <Leaf className="h-4.5 w-4.5" />
+              <span className="font-semibold">{lang === 'en' ? 'Home' : 'Ahabanza'}</span>
+            </button>
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = item.id === view;
